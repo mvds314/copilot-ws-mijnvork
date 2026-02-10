@@ -1,8 +1,8 @@
 'use client';
 
-import { useCallback, useState } from 'react';
-import { useDropzone } from 'react-dropzone';
-import { Upload, X, Image as ImageIcon, CheckCircle } from 'lucide-react';
+import { useCallback, useState, useEffect } from 'react';
+import { useDropzone, FileRejection } from 'react-dropzone';
+import { Upload, X, CheckCircle, AlertCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface UploadedFile {
@@ -10,7 +10,8 @@ interface UploadedFile {
   file: File;
   preview: string;
   status: 'uploading' | 'success' | 'error';
-  progress: number;
+  error?: string;
+  uploadedId?: string;
 }
 
 interface UploadZoneProps {
@@ -19,60 +20,121 @@ interface UploadZoneProps {
   className?: string;
 }
 
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+
 export function UploadZone({ onUpload, maxFiles = 10, className = "" }: UploadZoneProps) {
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
 
-  const onDrop = useCallback((acceptedFiles: File[]) => {
-    const newFiles = acceptedFiles.map(file => ({
+  const uploadFile = async (fileObj: UploadedFile) => {
+    try {
+      const formData = new FormData();
+      formData.append('file', fileObj.file);
+
+      const response = await fetch('/api/upload', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.message || error.error || 'Upload failed');
+      }
+
+      const result = await response.json();
+
+      setUploadedFiles(prev =>
+        prev.map(f =>
+          f.id === fileObj.id
+            ? { ...f, status: 'success', uploadedId: result.id }
+            : f
+        )
+      );
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Upload failed';
+      setUploadedFiles(prev =>
+        prev.map(f =>
+          f.id === fileObj.id
+            ? { ...f, status: 'error', error: errorMessage }
+            : f
+        )
+      );
+    }
+  };
+
+  const onDrop = useCallback((acceptedFiles: File[], rejectedFiles: FileRejection[]) => {
+    // Handle rejected files
+    if (rejectedFiles.length > 0) {
+      rejectedFiles.forEach(({ file, errors }) => {
+        const errorMessages = errors.map((e) => {
+          if (e.code === 'file-too-large') {
+            return `File too large (max ${MAX_FILE_SIZE / 1024 / 1024}MB)`;
+          }
+          return e.message;
+        }).join(', ');
+
+        const rejectedFileObj: UploadedFile = {
+          id: Math.random().toString(36).substring(2),
+          file,
+          preview: '',
+          status: 'error',
+          error: errorMessages,
+        };
+
+        setUploadedFiles(prev => [...prev, rejectedFileObj]);
+      });
+    }
+
+    // Client-side file size validation for better UX
+    const validFiles = acceptedFiles.filter(file => {
+      if (file.size > MAX_FILE_SIZE) {
+        const errorFileObj: UploadedFile = {
+          id: Math.random().toString(36).substring(2),
+          file,
+          preview: URL.createObjectURL(file),
+          status: 'error',
+          error: `File too large (max ${MAX_FILE_SIZE / 1024 / 1024}MB)`,
+        };
+        setUploadedFiles(prev => [...prev, errorFileObj]);
+        return false;
+      }
+      return true;
+    });
+
+    if (validFiles.length === 0) return;
+
+    const newFiles = validFiles.map(file => ({
       id: Math.random().toString(36).substring(2),
       file,
       preview: URL.createObjectURL(file),
       status: 'uploading' as const,
-      progress: 0,
     }));
 
     setUploadedFiles(prev => [...prev, ...newFiles]);
 
-    // Simulate upload progress
+    // Upload files to server
     newFiles.forEach(fileObj => {
-      const interval = setInterval(() => {
-        setUploadedFiles(prev => 
-          prev.map(f => 
-            f.id === fileObj.id 
-              ? { ...f, progress: Math.min(f.progress + 10, 100) }
-              : f
-          )
-        );
-      }, 200);
-
-      setTimeout(() => {
-        clearInterval(interval);
-        setUploadedFiles(prev => 
-          prev.map(f => 
-            f.id === fileObj.id 
-              ? { ...f, status: 'success', progress: 100 }
-              : f
-          )
-        );
-      }, 2000);
+      uploadFile(fileObj);
     });
 
-    onUpload?.(acceptedFiles);
+    onUpload?.(validFiles);
   }, [onUpload]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
     accept: {
-      'image/*': ['.jpeg', '.jpg', '.png', '.gif', '.webp']
+      'image/jpeg': ['.jpeg', '.jpg'],
+      'image/png': ['.png'],
+      'image/webp': ['.webp']
     },
     maxFiles,
+    maxSize: MAX_FILE_SIZE,
     multiple: true,
   });
 
   const removeFile = (id: string) => {
     setUploadedFiles(prev => {
       const file = prev.find(f => f.id === id);
-      if (file) {
+      if (file && file.preview) {
         URL.revokeObjectURL(file.preview);
       }
       return prev.filter(f => f.id !== id);
@@ -105,7 +167,7 @@ export function UploadZone({ onUpload, maxFiles = 10, className = "" }: UploadZo
               Drag and drop your images here, or click to browse
             </p>
             <p className="text-sm text-slate-400 dark:text-slate-500 mt-2">
-              Supports JPEG, PNG, GIF, WebP up to 10MB each
+              Supports JPEG, PNG, WebP up to 10MB each
             </p>
             </div>
           </div>
@@ -122,7 +184,8 @@ export function UploadZone({ onUpload, maxFiles = 10, className = "" }: UploadZo
           >
             <h4 className="text-lg font-semibold">Uploading Files</h4>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {uploadedFiles.map((fileObj) => (                  <motion.div
+              {uploadedFiles.map((fileObj) => (
+                <motion.div
                   key={fileObj.id}
                   initial={{ opacity: 0, scale: 0.8 }}
                   animate={{ opacity: 1, scale: 1 }}
@@ -136,18 +199,25 @@ export function UploadZone({ onUpload, maxFiles = 10, className = "" }: UploadZo
                     <X className="h-4 w-4" />
                   </button>
                   
-                  <div className="relative aspect-square mb-3 rounded-lg overflow-hidden bg-slate-100 dark:bg-slate-700">
-                    <img 
-                      src={fileObj.preview} 
-                      alt={fileObj.file.name}
-                      className="w-full h-full object-cover"
-                    />
-                    {fileObj.status === 'success' && (
-                      <div className="absolute inset-0 bg-green-500/20 flex items-center justify-center">
-                        <CheckCircle className="h-8 w-8 text-green-500" />
-                      </div>
-                    )}
-                  </div>
+                  {fileObj.preview && (
+                    <div className="relative aspect-square mb-3 rounded-lg overflow-hidden bg-slate-100 dark:bg-slate-700">
+                      <img 
+                        src={fileObj.preview} 
+                        alt={fileObj.file.name}
+                        className="w-full h-full object-cover"
+                      />
+                      {fileObj.status === 'success' && (
+                        <div className="absolute inset-0 bg-green-500/20 flex items-center justify-center">
+                          <CheckCircle className="h-8 w-8 text-green-500" />
+                        </div>
+                      )}
+                      {fileObj.status === 'error' && (
+                        <div className="absolute inset-0 bg-red-500/20 flex items-center justify-center">
+                          <AlertCircle className="h-8 w-8 text-red-500" />
+                        </div>
+                      )}
+                    </div>
+                  )}
                   
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
@@ -160,13 +230,9 @@ export function UploadZone({ onUpload, maxFiles = 10, className = "" }: UploadZo
                     </div>
                     
                     {fileObj.status === 'uploading' && (
-                      <div className="progress-bar">
-                        <motion.div
-                          className="progress-fill"
-                          initial={{ width: 0 }}
-                          animate={{ width: `${fileObj.progress}%` }}
-                          transition={{ duration: 0.2 }}
-                        />
+                      <div className="flex items-center gap-2 text-blue-600 text-sm">
+                        <div className="animate-spin h-4 w-4 border-2 border-blue-600 border-t-transparent rounded-full" />
+                        <span>Uploading...</span>
                       </div>
                     )}
                     
@@ -174,6 +240,13 @@ export function UploadZone({ onUpload, maxFiles = 10, className = "" }: UploadZo
                       <div className="flex items-center gap-2 text-green-600 text-sm">
                         <CheckCircle className="h-4 w-4" />
                         <span>Upload complete</span>
+                      </div>
+                    )}
+
+                    {fileObj.status === 'error' && (
+                      <div className="flex items-center gap-2 text-red-600 text-sm">
+                        <AlertCircle className="h-4 w-4" />
+                        <span className="truncate">{fileObj.error || 'Upload failed'}</span>
                       </div>
                     )}
                   </div>
