@@ -33,13 +33,17 @@ export const photoTagsSchema = z
 
 // Combined upload metadata schema
 export const uploadMetadataSchema = z.object({
-  title: photoTitleSchema.optional(),
+  title: z
+    .union([z.string(), z.null()])
+    .optional()
+    .transform((val) => (val && val.trim() ? val.trim() : undefined))
+    .pipe(photoTitleSchema.optional()),
   tags: z
-    .string()
+    .union([z.string(), z.null()])
     .optional()
     .transform((val) => {
-      if (!val) return [];
-      return val.split(',').map((t) => t.trim().toLowerCase());
+      if (!val || typeof val !== 'string') return [];
+      return val.split(',').map((t) => t.trim().toLowerCase()).filter(Boolean);
     })
     .pipe(photoTagsSchema),
 });
