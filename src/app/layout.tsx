@@ -1,13 +1,7 @@
 import type { Metadata } from "next";
-import { Geist } from "next/font/google";
 import Link from "next/link";
 import { Camera } from "lucide-react";
 import "./globals.css";
-
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
 
 export const metadata: Metadata = {
   title: "Photo Gallery & Portfolio",
@@ -21,9 +15,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body
-        className={`${geistSans.variable} antialiased`}
-      >
+      <body className="antialiased">
         {/* Navigation Header */}
         <header className="border-b bg-white/50 dark:bg-slate-900/50 backdrop-blur-sm sticky top-0 z-40">
           <div className="container mx-auto px-4 py-4">
@@ -41,9 +33,11 @@ export default function RootLayout({
                 <Link href="/upload" className="nav-link">
                   Upload
                 </Link>
-                <Link href="/admin" className="btn-primary">
-                  Admin
-                </Link>
+                {process.env.NEXT_PUBLIC_ADMIN_ENABLED === 'true' && (
+                  <Link href="/admin" className="btn-primary">
+                    Admin
+                  </Link>
+                )}
               </nav>
             </div>
           </div>
