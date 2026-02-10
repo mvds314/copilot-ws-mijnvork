@@ -1,8 +1,8 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useState, useEffect } from 'react';
 import { useDropzone } from 'react-dropzone';
-import { Upload, X, Image as ImageIcon, CheckCircle } from 'lucide-react';
+import { Upload, X, CheckCircle, AlertCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface UploadedFile {
@@ -11,6 +11,7 @@ interface UploadedFile {
   preview: string;
   status: 'uploading' | 'success' | 'error';
   progress: number;
+  errorMessage?: string;
 }
 
 interface UploadZoneProps {
@@ -19,8 +20,69 @@ interface UploadZoneProps {
   className?: string;
 }
 
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB - client-side check for UX
+
 export function UploadZone({ onUpload, maxFiles = 10, className = "" }: UploadZoneProps) {
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
+
+  // Cleanup object URLs on unmount
+  useEffect(() => {
+    return () => {
+      uploadedFiles.forEach(fileObj => {
+        URL.revokeObjectURL(fileObj.preview);
+      });
+    };
+  }, [uploadedFiles]);
+
+  const uploadFileToServer = useCallback(async (fileObj: UploadedFile) => {
+    try {
+      // Client-side size validation for UX (server also validates)
+      if (fileObj.file.size > MAX_FILE_SIZE) {
+        throw new Error(`File size exceeds maximum of ${MAX_FILE_SIZE / 1024 / 1024}MB`);
+      }
+
+      const formData = new FormData();
+      formData.append('file', fileObj.file);
+      formData.append('title', fileObj.file.name);
+      // Tags could be added here if we had a tag selector in the UI
+
+      const response = await fetch('/api/upload', {
+        method: 'POST',
+        body: formData,
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || 'Upload failed');
+      }
+
+      // Update status to success
+      setUploadedFiles(prev =>
+        prev.map(f =>
+          f.id === fileObj.id
+            ? { ...f, status: 'success', progress: 100 }
+            : f
+        )
+      );
+
+      onUpload?.([fileObj.file]);
+    } catch (error) {
+      // Update status to error
+      setUploadedFiles(prev =>
+        prev.map(f =>
+          f.id === fileObj.id
+            ? { 
+                ...f, 
+                status: 'error', 
+                progress: 0,
+                errorMessage: error instanceof Error ? error.message : 'Upload failed'
+              }
+            : f
+        )
+      );
+    }
+  }, [onUpload]);
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     const newFiles = acceptedFiles.map(file => ({
@@ -33,39 +95,23 @@ export function UploadZone({ onUpload, maxFiles = 10, className = "" }: UploadZo
 
     setUploadedFiles(prev => [...prev, ...newFiles]);
 
-    // Simulate upload progress
+    // Upload each file to the server
     newFiles.forEach(fileObj => {
-      const interval = setInterval(() => {
-        setUploadedFiles(prev => 
-          prev.map(f => 
-            f.id === fileObj.id 
-              ? { ...f, progress: Math.min(f.progress + 10, 100) }
-              : f
-          )
-        );
-      }, 200);
-
-      setTimeout(() => {
-        clearInterval(interval);
-        setUploadedFiles(prev => 
-          prev.map(f => 
-            f.id === fileObj.id 
-              ? { ...f, status: 'success', progress: 100 }
-              : f
-          )
-        );
-      }, 2000);
+      uploadFileToServer(fileObj);
     });
-
-    onUpload?.(acceptedFiles);
-  }, [onUpload]);
+  }, [uploadFileToServer]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
     accept: {
-      'image/*': ['.jpeg', '.jpg', '.png', '.gif', '.webp']
+      // Client-side accept for UX only - server validates via magic bytes
+      // Excluding SVG for security (not allowed on server)
+      'image/jpeg': ['.jpg', '.jpeg'],
+      'image/png': ['.png'],
+      'image/webp': ['.webp']
     },
     maxFiles,
+    maxSize: MAX_FILE_SIZE, // Client-side size check for UX
     multiple: true,
   });
 
@@ -105,7 +151,7 @@ export function UploadZone({ onUpload, maxFiles = 10, className = "" }: UploadZo
               Drag and drop your images here, or click to browse
             </p>
             <p className="text-sm text-slate-400 dark:text-slate-500 mt-2">
-              Supports JPEG, PNG, GIF, WebP up to 10MB each
+              Supports JPEG, PNG, WebP up to 10MB each (server validates all uploads)
             </p>
             </div>
           </div>
@@ -137,14 +183,20 @@ export function UploadZone({ onUpload, maxFiles = 10, className = "" }: UploadZo
                   </button>
                   
                   <div className="relative aspect-square mb-3 rounded-lg overflow-hidden bg-slate-100 dark:bg-slate-700">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img 
-                      src={fileObj.preview} 
+                      src={fileObj.preview}
                       alt={fileObj.file.name}
                       className="w-full h-full object-cover"
                     />
                     {fileObj.status === 'success' && (
                       <div className="absolute inset-0 bg-green-500/20 flex items-center justify-center">
                         <CheckCircle className="h-8 w-8 text-green-500" />
+                      </div>
+                    )}
+                    {fileObj.status === 'error' && (
+                      <div className="absolute inset-0 bg-red-500/20 flex items-center justify-center">
+                        <AlertCircle className="h-8 w-8 text-red-500" />
                       </div>
                     )}
                   </div>
@@ -174,6 +226,18 @@ export function UploadZone({ onUpload, maxFiles = 10, className = "" }: UploadZo
                       <div className="flex items-center gap-2 text-green-600 text-sm">
                         <CheckCircle className="h-4 w-4" />
                         <span>Upload complete</span>
+                      </div>
+                    )}
+                    
+                    {fileObj.status === 'error' && (
+                      <div className="flex flex-col gap-1">
+                        <div className="flex items-center gap-2 text-red-600 text-sm">
+                          <AlertCircle className="h-4 w-4" />
+                          <span>Upload failed</span>
+                        </div>
+                        {fileObj.errorMessage && (
+                          <p className="text-xs text-red-500">{fileObj.errorMessage}</p>
+                        )}
                       </div>
                     )}
                   </div>

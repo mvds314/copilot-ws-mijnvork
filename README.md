@@ -67,7 +67,44 @@ Once ready, you can access the application at the forwarded port URL provided in
 ```bash
 src/
 ├── app/                 # Next.js 15 App Router pages
+│   ├── api/            # API routes (upload endpoint)
+│   └── ...
 ├── components/          # Reusable React components
 ├── lib/                 # Utility functions and helpers
+├── middleware.ts        # Next.js middleware (admin access control)
 demos/                   # Demo guides and templates
 ```
+
+## Security Features
+
+This application implements comprehensive security hardening aligned with OWASP Top 10 best practices:
+
+### 🔒 Key Security Features
+
+- **Secure File Upload**: Server-side validation using magic bytes, not client MIME types
+- **Image Re-encoding**: Strips metadata and neutralizes polyglot attacks using Sharp
+- **Rate Limiting**: 10 uploads/minute per IP (Upstash Redis or in-memory)
+- **Input Validation**: Zod schemas with tag allowlist and control character rejection
+- **Security Headers**: CSP, X-Frame-Options, X-Content-Type-Options, and more
+- **Access Control**: Feature-flag based admin route protection
+- **Decompression Bomb Protection**: Max 25 megapixel limit
+
+### 📖 Documentation
+
+- See [SECURITY.md](SECURITY.md) for detailed security implementation guide
+- See [.env.example](.env.example) for required environment variables
+
+### 🧪 Quick Security Tests
+
+```bash
+# Test file upload
+curl -X POST http://localhost:3000/api/upload \
+  -F "file=@photo.jpg" \
+  -F "title=My Photo" \
+  -F "tags=landscape,nature"
+
+# Verify security headers
+curl -I http://localhost:3000 | grep -i "x-frame\|csp"
+```
+
+For more security testing examples, see [SECURITY.md](SECURITY.md).
