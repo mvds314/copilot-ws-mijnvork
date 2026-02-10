@@ -12,13 +12,19 @@ export class InMemoryRateLimiter {
   private store: Map<string, RateLimitEntry> = new Map();
   private maxRequests: number;
   private windowMs: number;
+  private cleanupInterval: NodeJS.Timeout | null = null;
 
   constructor(maxRequests: number, windowMs: number) {
     this.maxRequests = maxRequests;
     this.windowMs = windowMs;
 
     // Clean up expired entries every minute
-    setInterval(() => this.cleanup(), 60000);
+    // Only create one interval since this is a singleton in the module
+    if (!this.cleanupInterval) {
+      this.cleanupInterval = setInterval(() => this.cleanup(), 60000);
+      // Don't prevent Node from exiting
+      this.cleanupInterval.unref();
+    }
   }
 
   private cleanup(): void {
@@ -28,6 +34,14 @@ export class InMemoryRateLimiter {
         this.store.delete(key);
       }
     }
+  }
+
+  destroy(): void {
+    if (this.cleanupInterval) {
+      clearInterval(this.cleanupInterval);
+      this.cleanupInterval = null;
+    }
+    this.store.clear();
   }
 
   async limit(identifier: string): Promise<{
