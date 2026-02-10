@@ -25,16 +25,6 @@ const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 export function UploadZone({ onUpload, maxFiles = 10, className = "" }: UploadZoneProps) {
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
 
-  // Cleanup: Revoke object URLs on unmount
-  useEffect(() => {
-    const files = uploadedFiles;
-    return () => {
-      files.forEach(fileObj => {
-        URL.revokeObjectURL(fileObj.preview);
-      });
-    };
-  }, [uploadedFiles]);
-
   const uploadFile = async (fileObj: UploadedFile) => {
     try {
       const formData = new FormData();

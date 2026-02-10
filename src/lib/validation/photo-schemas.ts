@@ -19,7 +19,7 @@ export const photoTitleSchema = z
 const tagSchema = z
   .string()
   .trim()
-  .toLowerCase()
+  .transform((val) => val.toLowerCase())
   .refine(
     (val) => AVAILABLE_TAGS.includes(val),
     'Tag must be from the allowed list'
